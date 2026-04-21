@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -215,7 +216,8 @@ def transfer_cmd(
     new_path = injector.inject(transcript)
     _success(f"Created {to_a.title()} session: {new_path.stem}")
     _info(f"  {new_path}")
-    _info("Ready to continue!")
+    _info("")
+    _info(_resume_help(to_a, new_path))
 
 
 def _emit(transcript: CanonicalTranscript, fmt: str) -> None:
@@ -226,6 +228,35 @@ def _emit(transcript: CanonicalTranscript, fmt: str) -> None:
     else:
         # "native" without a target; markdown is a sensible default for humans
         click.echo(to_markdown(transcript))
+
+
+def _resume_help(agent: str, path: Path) -> str:
+    """Agent-specific instructions for opening the injected session."""
+    session_id = path.stem
+    if agent == "claude":
+        return (
+            "To continue in Claude Code:\n"
+            f"    claude --resume {session_id}"
+        )
+    if agent == "codex":
+        try:
+            first = path.read_text(encoding="utf-8").splitlines()[0]
+            record = json.loads(first)
+            session_id = record.get("payload", {}).get("id") or session_id
+        except (OSError, json.JSONDecodeError, IndexError, AttributeError):
+            pass
+        return (
+            "To continue in Codex:\n"
+            f"    codex resume {session_id}\n"
+            "(or just run `codex` in this directory — the most recent rollout is picked up)"
+        )
+    if agent == "opencode":
+        return (
+            "To continue in OpenCode:\n"
+            "    opencode       # then open the 'Handoff from <agent>' session from the session list\n"
+            f"(session id: {session_id})"
+        )
+    return "Ready to continue!"
 
 
 # ---------------------------------------------------------------------------

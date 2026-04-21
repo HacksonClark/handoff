@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import json
+import logging
+import os
+import sqlite3
 import uuid
 from collections.abc import Iterator
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from handoff import __version__
 from handoff.agents.base import (
     Extractor,
     Injector,
@@ -50,6 +54,72 @@ def _content_to_text(content: list[dict[str, Any]] | str | None) -> str:
         if "text" in item:
             parts.append(str(item["text"]))
     return "\n".join(parts)
+
+
+def _sqlite_insert_thread(
+    db_path: Path,
+    *,
+    session_id: str,
+    rollout_path: Path,
+    cwd: str,
+    title: str,
+    first_user_message: str,
+    git_branch: str | None,
+    created_at: datetime,
+    updated_at: datetime,
+    cli_version: str,
+    model: str | None,
+    reasoning_effort: str | None,
+) -> None:
+    """Register an injected rollout in Codex's thread index.
+
+    Newer Codex builds discover resumable sessions from ``state_5.sqlite``.
+    Writing the JSONL rollout alone is not sufficient for ``codex resume`` or
+    for automatic session pickup in a directory.
+    """
+    created_secs = int(created_at.timestamp())
+    updated_secs = int(updated_at.timestamp())
+    created_ms = int(created_at.timestamp() * 1000)
+    updated_ms = int(updated_at.timestamp() * 1000)
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            "INSERT OR REPLACE INTO threads ("
+            " id, rollout_path, created_at, updated_at, source, model_provider,"
+            " cwd, title, sandbox_policy, approval_mode, tokens_used,"
+            " has_user_event, archived, git_sha, git_branch, git_origin_url,"
+            " cli_version, first_user_message, memory_mode, model,"
+            " reasoning_effort, created_at_ms, updated_at_ms"
+            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                session_id,
+                str(rollout_path),
+                created_secs,
+                updated_secs,
+                "cli",
+                "openai",
+                cwd,
+                title,
+                json.dumps({"type": "workspace-write", "writable_roots": []}),
+                "on-request",
+                0,
+                1 if first_user_message else 0,
+                0,
+                None,
+                git_branch,
+                None,
+                cli_version,
+                first_user_message,
+                "enabled",
+                model,
+                reasoning_effort,
+                created_ms,
+                updated_ms,
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 class CodexExtractor(Extractor):
@@ -261,6 +331,7 @@ class CodexInjector(Injector):
     def inject(self, transcript: CanonicalTranscript) -> Path:
         from copy import deepcopy
 
+        log = logging.getLogger(__name__)
         transcript = strip_infra(deepcopy(transcript))
 
         ts = datetime.now(timezone.utc)
@@ -270,6 +341,12 @@ class CodexInjector(Injector):
 
         ts_iso = ts.isoformat().replace("+00:00", "Z")
         lines: list[dict[str, Any]] = []
+        first_user_message = next(
+            (msg.content for msg in transcript.transcript if msg.author == "user" and msg.content.strip()),
+            "",
+        )
+        title = first_user_message or f"Handoff from {transcript.metadata.source_agent}"
+        cli_version = __version__
 
         # session_meta
         lines.append(
@@ -281,7 +358,7 @@ class CodexInjector(Injector):
                     "timestamp": ts_iso,
                     "cwd": transcript.metadata.cwd,
                     "originator": "handoff_cli",
-                    "cli_version": "0.1.0",
+                    "cli_version": cli_version,
                     "source": "handoff",
                     "instructions": (
                         "This session was transferred from "
@@ -316,6 +393,26 @@ class CodexInjector(Injector):
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             for rec in lines:
                 f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+
+        db_path = self.home / "state_5.sqlite"
+        if db_path.exists():
+            try:
+                _sqlite_insert_thread(
+                    db_path,
+                    session_id=session_id,
+                    rollout_path=path,
+                    cwd=transcript.metadata.cwd,
+                    title=title,
+                    first_user_message=first_user_message,
+                    git_branch=transcript.metadata.git_branch,
+                    created_at=ts,
+                    updated_at=ts,
+                    cli_version=cli_version,
+                    model=transcript.metadata.model,
+                    reasoning_effort=None,
+                )
+            except Exception as exc:
+                log.warning("handoff: Codex SQLite mirror failed (falling back to JSONL-only): %s", exc)
         return path
 
     @staticmethod

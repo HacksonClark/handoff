@@ -185,3 +185,113 @@ def test_injected_files_are_mode_0600(tmp_path):
 
     mode = stat.S_IMODE(session_path.stat().st_mode)
     assert mode == 0o600, f"expected 0600, got {oct(mode)}"
+
+
+def test_project_id_uses_git_first_commit_when_in_git_repo(tmp_path):
+    """OpenCode keys projects by the hash of the first commit in the worktree."""
+    import subprocess
+
+    from handoff.agents.opencode import _project_id_for
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.email", "t@t"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.name", "t"], cwd=repo, check=True)
+    (repo / "README").write_text("hi")
+    subprocess.run(["git", "add", "."], cwd=repo, check=True)
+    subprocess.run(
+        ["git", "commit", "-q", "-m", "first", "--no-gpg-sign"],
+        cwd=repo,
+        check=True,
+    )
+
+    expected = subprocess.run(
+        ["git", "-C", str(repo), "rev-list", "--max-parents=0", "HEAD"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+
+    assert _project_id_for(str(repo)) == expected
+
+
+def test_project_id_falls_back_to_sha1_for_non_git_dir(tmp_path):
+    import hashlib
+
+    from handoff.agents.opencode import _project_id_for
+
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    expected = hashlib.sha1(str(plain.resolve()).encode()).hexdigest()
+    assert _project_id_for(str(plain)) == expected
+
+
+def test_inject_writes_to_sqlite_when_db_exists(tmp_path):
+    import sqlite3
+
+    from handoff.canonical import CanonicalTranscript, Message, Metadata, now_iso
+
+    home = tmp_path / "opencode"
+    home.mkdir()
+
+    # Create a minimal DB matching OpenCode's schema.
+    db_path = home / "opencode.db"
+    conn = sqlite3.connect(db_path)
+    conn.executescript(
+        """
+        CREATE TABLE project (
+            id TEXT PRIMARY KEY, worktree TEXT, vcs TEXT, name TEXT,
+            icon_url TEXT, icon_color TEXT,
+            time_created INTEGER, time_updated INTEGER, time_initialized INTEGER,
+            sandboxes TEXT, commands TEXT
+        );
+        CREATE TABLE session (
+            id TEXT PRIMARY KEY, project_id TEXT, parent_id TEXT, slug TEXT,
+            directory TEXT, title TEXT, version TEXT, share_url TEXT,
+            summary_additions INTEGER, summary_deletions INTEGER,
+            summary_files INTEGER, summary_diffs TEXT, revert TEXT,
+            permission TEXT, time_created INTEGER, time_updated INTEGER,
+            time_compacting INTEGER, time_archived INTEGER, workspace_id TEXT
+        );
+        CREATE TABLE message (
+            id TEXT PRIMARY KEY, session_id TEXT,
+            time_created INTEGER, time_updated INTEGER, data TEXT
+        );
+        CREATE TABLE part (
+            id TEXT PRIMARY KEY, message_id TEXT, session_id TEXT,
+            time_created INTEGER, time_updated INTEGER, data TEXT
+        );
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    t = CanonicalTranscript(
+        metadata=Metadata(
+            session_id="src",
+            source_agent="claude",
+            source_session_path="/tmp/src.jsonl",
+            created_at=now_iso(),
+            last_activity=now_iso(),
+            message_count=1,
+            cwd="/Users/me/a",
+        ),
+        transcript=[
+            Message(id="1", timestamp=now_iso(), author="user", type="message", content="hi"),
+        ],
+    )
+    OpenCodeInjector(home).inject(t)
+
+    conn = sqlite3.connect(db_path)
+    sessions = list(conn.execute("SELECT id, project_id, title FROM session"))
+    assert len(sessions) == 1
+    assert sessions[0][2] == "Handoff from claude"
+    msgs = list(conn.execute("SELECT id, session_id, data FROM message"))
+    assert len(msgs) == 1
+    parts = list(conn.execute("SELECT id, data FROM part"))
+    assert len(parts) == 1
+    import json as _json
+
+    assert "[handoff]" in _json.loads(parts[0][1])["text"]
+    conn.close()

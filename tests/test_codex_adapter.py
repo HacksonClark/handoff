@@ -141,3 +141,99 @@ def test_inject_produces_valid_jsonl_with_session_meta(codex_home, codex_session
 
     # File lives under the expected YYYY/MM/DD hierarchy
     assert out.parent.parent.parent.parent == codex_home / "sessions"
+
+
+def test_inject_registers_thread_when_state_db_exists(codex_home):
+    import sqlite3
+
+    from handoff.canonical import CanonicalTranscript, Message, Metadata, now_iso
+
+    db_path = codex_home / "state_5.sqlite"
+    conn = sqlite3.connect(db_path)
+    conn.executescript(
+        """
+        CREATE TABLE threads (
+            id TEXT PRIMARY KEY,
+            rollout_path TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            source TEXT NOT NULL,
+            model_provider TEXT NOT NULL,
+            cwd TEXT NOT NULL,
+            title TEXT NOT NULL,
+            sandbox_policy TEXT NOT NULL,
+            approval_mode TEXT NOT NULL,
+            tokens_used INTEGER NOT NULL DEFAULT 0,
+            has_user_event INTEGER NOT NULL DEFAULT 0,
+            archived INTEGER NOT NULL DEFAULT 0,
+            archived_at INTEGER,
+            git_sha TEXT,
+            git_branch TEXT,
+            git_origin_url TEXT,
+            cli_version TEXT NOT NULL DEFAULT '',
+            first_user_message TEXT NOT NULL DEFAULT '',
+            agent_nickname TEXT,
+            agent_role TEXT,
+            memory_mode TEXT NOT NULL DEFAULT 'enabled',
+            model TEXT,
+            reasoning_effort TEXT,
+            agent_path TEXT,
+            created_at_ms INTEGER,
+            updated_at_ms INTEGER
+        );
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    transcript = CanonicalTranscript(
+        metadata=Metadata(
+            session_id="src",
+            source_agent="claude",
+            source_session_path="/tmp/src.jsonl",
+            created_at=now_iso(),
+            last_activity=now_iso(),
+            message_count=2,
+            cwd="/Users/me/a",
+            git_branch="main",
+            model="gpt-5.4",
+        ),
+        transcript=[
+            Message(
+                id="1",
+                timestamp=now_iso(),
+                author="user",
+                type="message",
+                content="Continue the auth work",
+            ),
+            Message(
+                id="2",
+                timestamp=now_iso(),
+                author="agent",
+                type="message",
+                content="I inspected the adapters",
+            ),
+        ],
+    )
+
+    out = CodexInjector(codex_home).inject(transcript)
+    records = [json.loads(line) for line in out.read_text().splitlines() if line.strip()]
+    session_id = records[0]["payload"]["id"]
+
+    conn = sqlite3.connect(db_path)
+    rows = list(
+        conn.execute(
+            "SELECT id, rollout_path, cwd, title, first_user_message, git_branch, model "
+            "FROM threads"
+        )
+    )
+    conn.close()
+
+    assert len(rows) == 1
+    assert rows[0][0] == session_id
+    assert rows[0][1] == str(out)
+    assert rows[0][2] == "/Users/me/a"
+    assert rows[0][3] == "Continue the auth work"
+    assert rows[0][4] == "Continue the auth work"
+    assert rows[0][5] == "main"
+    assert rows[0][6] == "gpt-5.4"
