@@ -7,7 +7,7 @@ on:
 
 # Use PyPI trusted publishing — no long-lived token required.
 # Configure at https://pypi.org/manage/account/publishing/
-# Project: handoff, Owner: <your-org>, Repo: handoff, Workflow: release.yml, Environment: pypi
+# Project: handoff-agent, Owner: HacksonClark, Repo: handoff, Workflow: release.yml, Environment: pypi
 permissions:
   contents: read
 
@@ -41,7 +41,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: pypi
-      url: https://pypi.org/p/handoff
+      url: https://pypi.org/p/handoff-agent
     permissions:
       id-token: write  # trusted publishing
     steps:

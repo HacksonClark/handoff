@@ -342,7 +342,11 @@ class CodexInjector(Injector):
         ts_iso = ts.isoformat().replace("+00:00", "Z")
         lines: list[dict[str, Any]] = []
         first_user_message = next(
-            (msg.content for msg in transcript.transcript if msg.author == "user" and msg.content.strip()),
+            (
+                msg.content
+                for msg in transcript.transcript
+                if msg.author == "user" and msg.content.strip()
+            ),
             "",
         )
         title = first_user_message or f"Handoff from {transcript.metadata.source_agent}"
@@ -387,8 +391,6 @@ class CodexInjector(Injector):
         for msg in transcript.transcript:
             lines.extend(self._message_to_records(msg, ts_iso))
 
-        import os
-
         fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             for rec in lines:
@@ -412,7 +414,9 @@ class CodexInjector(Injector):
                     reasoning_effort=None,
                 )
             except Exception as exc:
-                log.warning("handoff: Codex SQLite mirror failed (falling back to JSONL-only): %s", exc)
+                log.warning(
+                    "handoff: Codex SQLite mirror failed (falling back to JSONL-only): %s", exc
+                )
         return path
 
     @staticmethod

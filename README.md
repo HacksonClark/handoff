@@ -17,12 +17,15 @@ When you switch between AI coding agents mid-project — rate limits, a second o
 
 ## Install
 
+The CLI is named `handoff`; the PyPI distribution is `handoff-agent` (the
+short name was already taken):
+
 ```bash
 # uv (recommended)
-uv tool install handoff
+uv tool install handoff-agent
 
 # pip
-pip install handoff
+pip install handoff-agent
 ```
 
 ## Usage

@@ -12,7 +12,7 @@ class Handoff < Formula
 
   desc "Seamlessly switch between AI coding agents without losing context"
   homepage "https://github.com/HacksonClark/handoff"
-  url "https://files.pythonhosted.org/packages/source/h/handoff/handoff-0.1.0.tar.gz"
+  url "https://files.pythonhosted.org/packages/source/h/handoff-agent/handoff_agent-0.1.0.tar.gz"
   sha256 "REPLACE_WITH_SHA256_OF_SDIST"
   license "MIT"
 

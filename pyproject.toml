@@ -1,5 +1,5 @@
 [project]
-name = "handoff"
+name = "handoff-agent"
 version = "0.1.0"
 description = "Seamlessly switch between AI coding agents without losing context."
 readme = "README.md"

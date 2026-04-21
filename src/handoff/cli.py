@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 import json
+import os
+import shutil
+import subprocess
 import sys
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -217,7 +221,10 @@ def transfer_cmd(
     _success(f"Created {to_a.title()} session: {new_path.stem}")
     _info(f"  {new_path}")
     _info("")
-    _info(_resume_help(to_a, new_path))
+    hint = _resume_hint(to_a, new_path)
+    _info(hint.text)
+    if hint.command:
+        _prompt_copy(hint.command)
 
 
 def _emit(transcript: CanonicalTranscript, fmt: str) -> None:
@@ -230,14 +237,23 @@ def _emit(transcript: CanonicalTranscript, fmt: str) -> None:
         click.echo(to_markdown(transcript))
 
 
-def _resume_help(agent: str, path: Path) -> str:
-    """Agent-specific instructions for opening the injected session."""
+@dataclass(frozen=True)
+class ResumeHint:
+    """Instructions for resuming an injected session, plus a copyable command.
+
+    ``command`` is ``None`` when there is no single command to copy (e.g. the
+    target agent only exposes a session picker UI).
+    """
+
+    text: str
+    command: str | None = None
+
+
+def _resume_hint(agent: str, path: Path) -> ResumeHint:
     session_id = path.stem
     if agent == "claude":
-        return (
-            "To continue in Claude Code:\n"
-            f"    claude --resume {session_id}"
-        )
+        command = f"claude --resume {session_id}"
+        return ResumeHint(text=f"To continue in Claude Code:\n    {command}", command=command)
     if agent == "codex":
         try:
             first = path.read_text(encoding="utf-8").splitlines()[0]
@@ -245,18 +261,85 @@ def _resume_help(agent: str, path: Path) -> str:
             session_id = record.get("payload", {}).get("id") or session_id
         except (OSError, json.JSONDecodeError, IndexError, AttributeError):
             pass
-        return (
-            "To continue in Codex:\n"
-            f"    codex resume {session_id}\n"
-            "(or just run `codex` in this directory — the most recent rollout is picked up)"
+        command = f"codex resume {session_id}"
+        return ResumeHint(
+            text=(
+                "To continue in Codex:\n"
+                f"    {command}\n"
+                "(or just run `codex` in this directory — the most recent rollout is picked up)"
+            ),
+            command=command,
         )
     if agent == "opencode":
-        return (
-            "To continue in OpenCode:\n"
-            "    opencode       # then open the 'Handoff from <agent>' session from the session list\n"
-            f"(session id: {session_id})"
+        # OpenCode has no single-command resume — user picks from a session list.
+        return ResumeHint(
+            text=(
+                "To continue in OpenCode:\n"
+                "    opencode       # then open the 'Handoff from <agent>' session from the session list\n"
+                f"(session id: {session_id})"
+            ),
+            command=None,
         )
-    return "Ready to continue!"
+    return ResumeHint(text="Ready to continue!", command=None)
+
+
+def _copy_to_clipboard(text: str) -> bool:
+    """Copy ``text`` to the system clipboard. Returns True on success."""
+    candidates: list[list[str]] = []
+    if sys.platform == "darwin":
+        candidates = [["pbcopy"]]
+    elif sys.platform == "win32":
+        candidates = [["clip"]]
+    else:
+        if os.environ.get("WAYLAND_DISPLAY"):
+            candidates.append(["wl-copy"])
+        candidates.extend(
+            [["xclip", "-selection", "clipboard"], ["xsel", "--clipboard", "--input"]]
+        )
+
+    for cmd in candidates:
+        if not shutil.which(cmd[0]):
+            continue
+        try:
+            subprocess.run(cmd, input=text, text=True, check=True, timeout=2)
+            return True
+        except (subprocess.SubprocessError, OSError):
+            continue
+    return False
+
+
+def _prompt_copy(command: str) -> None:
+    """Offer to copy ``command`` to the clipboard on keypress.
+
+    Only runs in interactive terminals; a no-op when stdout/stdin aren't TTYs
+    (e.g. piped output, CI, test harnesses).
+    """
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        return
+
+    click.echo("")
+    prompt = click.style(
+        "Press (c) to copy command, any other key to continue...", fg="cyan", dim=True
+    )
+    click.echo(prompt, nl=False)
+    try:
+        ch = click.getchar(echo=False)
+    except (KeyboardInterrupt, EOFError):
+        click.echo("")
+        return
+
+    # Wipe the prompt line so the final output doesn't include the prompt text.
+    click.echo("\r\033[2K", nl=False)
+    if ch and ch.lower() == "c":
+        if _copy_to_clipboard(command):
+            click.echo(click.style("✓ Copied to clipboard.", fg="green"))
+        else:
+            click.echo(
+                click.style(
+                    "✗ Could not copy (no clipboard tool found — install pbcopy/xclip/wl-copy).",
+                    fg="yellow",
+                )
+            )
 
 
 # ---------------------------------------------------------------------------
