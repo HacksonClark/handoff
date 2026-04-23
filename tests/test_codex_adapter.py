@@ -129,6 +129,11 @@ def test_inject_produces_valid_jsonl_with_session_meta(codex_home, codex_session
     records = [json.loads(line) for line in out.read_text().splitlines() if line.strip()]
     assert records[0]["type"] == "session_meta"
     assert records[0]["payload"]["cwd"] == "/Users/me/a"
+    assert records[0]["payload"]["originator"] == "codex-tui"
+    assert records[0]["payload"]["source"] == "cli"
+    assert records[0]["payload"]["model_provider"] == "openai"
+    assert records[1]["type"] == "turn_context"
+    assert records[1]["payload"]["model"] == "gpt-5.4"
     # At least one user message should have been replayed
     user_msgs = [
         r
@@ -237,3 +242,35 @@ def test_inject_registers_thread_when_state_db_exists(codex_home):
     assert rows[0][4] == "Continue the auth work"
     assert rows[0][5] == "main"
     assert rows[0][6] == "gpt-5.4"
+
+
+def test_inject_falls_back_from_synthetic_model(codex_home):
+    from handoff.canonical import CanonicalTranscript, Message, Metadata, now_iso
+
+    transcript = CanonicalTranscript(
+        metadata=Metadata(
+            session_id="src",
+            source_agent="claude",
+            source_session_path="/tmp/src.jsonl",
+            created_at=now_iso(),
+            last_activity=now_iso(),
+            message_count=1,
+            cwd="/Users/me/a",
+            model="<synthetic>",
+        ),
+        transcript=[
+            Message(
+                id="1",
+                timestamp=now_iso(),
+                author="user",
+                type="message",
+                content="Pick up the previous work",
+            )
+        ],
+    )
+
+    out = CodexInjector(codex_home).inject(transcript)
+    records = [json.loads(line) for line in out.read_text().splitlines() if line.strip()]
+
+    assert records[1]["type"] == "turn_context"
+    assert records[1]["payload"]["model"] == "gpt-5.4"

@@ -122,6 +122,20 @@ def _sqlite_insert_thread(
         conn.close()
 
 
+def _resume_model(model: str | None) -> str:
+    """Pick a concrete model string for injected Codex sessions.
+
+    Real Codex sessions carry model selection in ``turn_context`` and in the
+    thread index. Cross-agent handoffs sometimes only have placeholder values
+    like ``<synthetic>``; those are not useful for resumption, so fall back to
+    the default Codex model.
+    """
+    cleaned = (model or "").strip()
+    if cleaned and not cleaned.startswith("<"):
+        return cleaned
+    return "gpt-5.4"
+
+
 class CodexExtractor(Extractor):
     agent_name = "codex"
 
@@ -333,6 +347,7 @@ class CodexInjector(Injector):
 
         log = logging.getLogger(__name__)
         transcript = strip_infra(deepcopy(transcript))
+        model = _resume_model(transcript.metadata.model)
 
         ts = datetime.now(timezone.utc)
         session_id = str(uuid.uuid4())
@@ -361,14 +376,28 @@ class CodexInjector(Injector):
                     "id": session_id,
                     "timestamp": ts_iso,
                     "cwd": transcript.metadata.cwd,
-                    "originator": "handoff_cli",
+                    "originator": "codex-tui",
                     "cli_version": cli_version,
-                    "source": "handoff",
+                    "source": "cli",
+                    "model_provider": "openai",
                     "instructions": (
                         "This session was transferred from "
                         f"{transcript.metadata.source_agent} via `handoff`. "
                         "The conversation up to this point has been reconstructed below."
                     ),
+                },
+            }
+        )
+
+        lines.append(
+            {
+                "timestamp": ts_iso,
+                "type": "turn_context",
+                "payload": {
+                    "cwd": transcript.metadata.cwd,
+                    "approval_policy": "on-request",
+                    "sandbox_policy": {"type": "workspace-write", "writable_roots": []},
+                    "model": model,
                 },
             }
         )
@@ -410,7 +439,7 @@ class CodexInjector(Injector):
                     created_at=ts,
                     updated_at=ts,
                     cli_version=cli_version,
-                    model=transcript.metadata.model,
+                    model=model,
                     reasoning_effort=None,
                 )
             except Exception as exc:

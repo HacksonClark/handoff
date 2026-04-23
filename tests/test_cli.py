@@ -51,6 +51,7 @@ def test_resume_hint_uses_codex_session_uuid(tmp_path: Path) -> None:
     hint = _resume_hint("codex", rollout)
     assert hint.command == "codex resume 392bdabb-6109-4343-81e5-6b7ca056b09d"
     assert "codex resume 392bdabb-6109-4343-81e5-6b7ca056b09d" in hint.text
+    assert "most recent rollout is picked up" not in hint.text
 
 
 def test_resume_hint_claude_has_copyable_command(tmp_path: Path) -> None:
