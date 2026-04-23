@@ -414,7 +414,7 @@ class OpenCodeInjector(Injector):
             {
                 "id": session_id,
                 "slug": slug,
-                "version": "handoff-0.1.1",
+                "version": "handoff-0.1.2",
                 "projectID": project_id,
                 "directory": cwd_abs,
                 "title": title,
@@ -467,7 +467,7 @@ class OpenCodeInjector(Injector):
                         "slug": slug,
                         "directory": cwd_abs,
                         "title": title,
-                        "version": "handoff-0.1.1",
+                        "version": "handoff-0.1.2",
                         "time_created": now_ms,
                         "time_updated": now_ms,
                     },
