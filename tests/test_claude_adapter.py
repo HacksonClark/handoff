@@ -48,6 +48,19 @@ def _assistant_tool_use(name: str, input_obj: dict, call_id: str = "toolu_1") ->
     }
 
 
+def _assistant_todowrite(items: list[tuple[str, str]]) -> dict:
+    return _assistant_tool_use(
+        "TodoWrite",
+        {
+            "todos": [
+                {"content": content, "status": status}
+                for content, status in items
+            ]
+        },
+        call_id="toolu_todo",
+    )
+
+
 def _tool_result(call_id: str, content: str) -> dict:
     return {
         "type": "user",
@@ -57,6 +70,34 @@ def _tool_result(call_id: str, content: str) -> dict:
         },
         "uuid": str(uuid.uuid4()),
         "timestamp": "2026-04-01T12:00:03Z",
+        "sessionId": "00000000-1111-2222-3333-444455556666",
+        "cwd": "/Users/me/a",
+    }
+
+
+def _away_summary(text: str) -> dict:
+    return {
+        "type": "system",
+        "subtype": "away_summary",
+        "content": text,
+        "timestamp": "2026-04-01T12:00:04Z",
+        "sessionId": "00000000-1111-2222-3333-444455556666",
+        "cwd": "/Users/me/a",
+    }
+
+
+def _task_reminder(items: list[tuple[str, str]]) -> dict:
+    return {
+        "type": "attachment",
+        "attachment": {
+            "type": "task_reminder",
+            "itemCount": len(items),
+            "content": [
+                {"subject": content, "status": status}
+                for content, status in items
+            ],
+        },
+        "timestamp": "2026-04-01T12:00:05Z",
         "sessionId": "00000000-1111-2222-3333-444455556666",
         "cwd": "/Users/me/a",
     }
@@ -103,6 +144,54 @@ def test_extract_handles_mixed_content(claude_home, claude_session_factory):
     assert ("system", "tool_result") in types
     assert t.metadata.source_session_path == str(path)
     assert t.metadata.git_branch == "main"
+
+
+def test_extract_captures_todo_state(claude_home, claude_session_factory):
+    claude_session_factory(
+        "/Users/me/a",
+        [
+            _assistant_todowrite(
+                [("Inspect bug", "completed"), ("Add regression test", "in_progress")]
+            )
+        ],
+    )
+
+    ex = ClaudeExtractor(claude_home)
+    from pathlib import Path
+
+    t = ex.extract(ex.find_latest(Path("/Users/me/a")))
+    assert t.artifacts.task_state is not None
+    assert t.artifacts.task_state.source == "TodoWrite"
+    assert [(i.content, i.status) for i in t.artifacts.task_state.items] == [
+        ("Inspect bug", "completed"),
+        ("Add regression test", "in_progress"),
+    ]
+
+
+def test_extract_captures_task_reminder_and_away_summary(claude_home, claude_session_factory):
+    claude_session_factory(
+        "/Users/me/a",
+        [
+            _task_reminder(
+                [("Add RuntimeClassName field", "in_progress"), ("Patch CRD schema", "pending")]
+            ),
+            _away_summary("Goal: resume the interrupted Anchor isolation upgrade."),
+        ],
+    )
+
+    ex = ClaudeExtractor(claude_home)
+    from pathlib import Path
+
+    t = ex.extract(ex.find_latest(Path("/Users/me/a")))
+    assert t.artifacts.task_state is not None
+    assert t.artifacts.task_state.source == "task_reminder"
+    assert [(i.content, i.status) for i in t.artifacts.task_state.items] == [
+        ("Add RuntimeClassName field", "in_progress"),
+        ("Patch CRD schema", "pending"),
+    ]
+    assert "resume the interrupted Anchor isolation upgrade" in (
+        t.artifacts.task_state.explanation or ""
+    )
 
 
 def test_inject_writes_well_formed_jsonl(claude_home, claude_session_factory):

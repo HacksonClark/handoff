@@ -43,6 +43,19 @@ def _function_call(call_id: str, name: str, args: str) -> dict:
     }
 
 
+def _update_plan(explanation: str, steps: list[tuple[str, str]]) -> dict:
+    return _function_call(
+        "plan_1",
+        "update_plan",
+        json.dumps(
+            {
+                "explanation": explanation,
+                "plan": [{"step": step, "status": status} for step, status in steps],
+            }
+        ),
+    )
+
+
 def _function_call_output(call_id: str, output: str) -> dict:
     return {
         "timestamp": "2026-04-01T12:00:03Z",
@@ -108,6 +121,33 @@ def test_extract_parses_messages_and_tool_calls(codex_home, codex_session_factor
     assert t.metadata.git_branch == "main"
     assert t.metadata.cwd == "/Users/me/a"
     assert t.metadata.source_session_path == str(path)
+
+
+def test_extract_captures_latest_update_plan_state(codex_home, codex_session_factory):
+    codex_session_factory(
+        cwd="/Users/me/a",
+        messages=[
+            _update_plan(
+                "Execution plan",
+                [("Inspect adapters", "completed"), ("Patch CLI", "in_progress")],
+            )
+        ],
+    )
+
+    from pathlib import Path
+
+    ex = CodexExtractor(codex_home)
+    ref = ex.find_latest(Path("/Users/me/a"))
+    assert ref is not None
+    t = ex.extract(ref)
+
+    assert t.artifacts.task_state is not None
+    assert t.artifacts.task_state.source == "update_plan"
+    assert t.artifacts.task_state.explanation == "Execution plan"
+    assert [(i.content, i.status) for i in t.artifacts.task_state.items] == [
+        ("Inspect adapters", "completed"),
+        ("Patch CLI", "in_progress"),
+    ]
 
 
 def test_inject_produces_valid_jsonl_with_session_meta(codex_home, codex_session_factory):

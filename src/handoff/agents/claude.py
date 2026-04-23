@@ -21,6 +21,8 @@ from handoff.canonical import (
     CanonicalTranscript,
     Message,
     Metadata,
+    TaskItem,
+    TaskState,
     now_iso,
     strip_infra,
 )
@@ -129,6 +131,8 @@ class ClaudeExtractor(Extractor):
         git_branch: str | None = None
         model: str | None = None
         files_modified: set[str] = set()
+        task_state: TaskState | None = None
+        away_summary: str | None = None
 
         for idx, rec in enumerate(_iter_jsonl(ref.path)):
             rtype = rec.get("type")
@@ -139,6 +143,22 @@ class ClaudeExtractor(Extractor):
                 cwd = rec["cwd"]
             if rec.get("gitBranch"):
                 git_branch = rec["gitBranch"]
+
+            if rtype == "system" and rec.get("subtype") == "away_summary":
+                content = rec.get("content")
+                if isinstance(content, str) and content.strip():
+                    away_summary = content.strip()
+                continue
+
+            if rtype == "attachment":
+                attachment = rec.get("attachment") or {}
+                if (
+                    isinstance(attachment, dict)
+                    and attachment.get("type") == "task_reminder"
+                    and task_state is None
+                ):
+                    task_state = _task_state_from_task_reminder(attachment)
+                continue
 
             if rtype == "user":
                 msg = rec.get("message") or {}
@@ -230,6 +250,8 @@ class ClaudeExtractor(Extractor):
                             fp = input_obj.get("file_path")
                             if isinstance(fp, str):
                                 files_modified.add(fp)
+                        elif name == "TodoWrite" and isinstance(input_obj, dict):
+                            task_state = _task_state_from_todo_write(input_obj)
 
             # attachment / file-history-snapshot / permission-mode / etc. → skip
 
@@ -247,10 +269,18 @@ class ClaudeExtractor(Extractor):
             git_branch=git_branch,
             model=model,
         )
+        if task_state is not None and away_summary:
+            if task_state.explanation:
+                task_state.explanation = f"{away_summary} | {task_state.explanation}"
+            else:
+                task_state.explanation = away_summary
         return CanonicalTranscript(
             metadata=meta,
             transcript=messages,
-            artifacts=Artifacts(files_modified=sorted(files_modified)),
+            artifacts=Artifacts(
+                files_modified=sorted(files_modified),
+                task_state=task_state,
+            ),
         )
 
 
@@ -266,6 +296,61 @@ def _tool_result_text(content: Any) -> str:
                 parts.append(str(item["text"]))
         return "\n".join(parts)
     return json.dumps(content, ensure_ascii=False)
+
+
+def _task_state_from_todo_write(input_obj: dict[str, Any]) -> TaskState | None:
+    raw_items = input_obj.get("todos") or input_obj.get("items") or input_obj.get("plan")
+    if not isinstance(raw_items, list):
+        return None
+
+    items: list[TaskItem] = []
+    for item in raw_items:
+        if not isinstance(item, dict):
+            continue
+        content = item.get("content") or item.get("step") or item.get("title")
+        status = item.get("status")
+        if not isinstance(content, str) or not isinstance(status, str):
+            continue
+        content = content.strip()
+        status = status.strip()
+        if not content or not status:
+            continue
+        items.append(TaskItem(content=content, status=status))
+
+    if not items:
+        return None
+
+    return TaskState(items=items, source="TodoWrite")
+
+
+def _task_state_from_task_reminder(attachment: dict[str, Any]) -> TaskState | None:
+    raw_items = attachment.get("content")
+    if not isinstance(raw_items, list):
+        return None
+
+    items: list[TaskItem] = []
+    for item in raw_items:
+        if not isinstance(item, dict):
+            continue
+        content = item.get("subject") or item.get("activeForm") or item.get("description")
+        status = item.get("status")
+        if not isinstance(content, str) or not isinstance(status, str):
+            continue
+        content = content.strip()
+        status = status.strip()
+        if not content or not status:
+            continue
+        items.append(TaskItem(content=content, status=status))
+
+    if not items:
+        return None
+
+    explanation = None
+    item_count = attachment.get("itemCount")
+    if isinstance(item_count, int):
+        explanation = f"{item_count} tasks captured from Claude task reminder"
+
+    return TaskState(items=items, source="task_reminder", explanation=explanation)
 
 
 class ClaudeInjector(Injector):

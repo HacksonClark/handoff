@@ -2,10 +2,13 @@ from handoff.canonical import (
     CanonicalTranscript,
     Message,
     Metadata,
+    TaskItem,
+    TaskState,
     is_infra_message,
     now_iso,
     strip_infra,
 )
+from handoff.formatters.markdown import to_markdown
 
 
 def _msg(author, typ, content):
@@ -64,3 +67,21 @@ def test_strip_infra_filters_and_updates_count():
     strip_infra(t)
     assert [m.content for m in t.transcript] == ["Real ask", "Real reply"]
     assert t.metadata.message_count == 2
+
+
+def test_markdown_includes_task_state_summary():
+    t = _t([_msg("user", "message", "Resume work")])
+    t.artifacts.task_state = TaskState(
+        items=[
+            TaskItem(content="Inspect session state", status="completed"),
+            TaskItem(content="Resume patch", status="in_progress"),
+        ],
+        source="update_plan",
+        explanation="Recovered from an interrupted session",
+    )
+
+    md = to_markdown(t)
+    assert "- Current task state:" in md
+    assert "- [completed] Inspect session state" in md
+    assert "- [in_progress] Resume patch" in md
+    assert "Recovered from an interrupted session" in md

@@ -25,6 +25,8 @@ from handoff.canonical import (
     CanonicalTranscript,
     Message,
     Metadata,
+    TaskItem,
+    TaskState,
     now_iso,
     strip_infra,
 )
@@ -54,6 +56,38 @@ def _content_to_text(content: list[dict[str, Any]] | str | None) -> str:
         if "text" in item:
             parts.append(str(item["text"]))
     return "\n".join(parts)
+
+
+def _task_state_from_update_plan(arguments: Any) -> TaskState | None:
+    if not isinstance(arguments, dict):
+        return None
+    raw_plan = arguments.get("plan")
+    if not isinstance(raw_plan, list):
+        return None
+
+    items: list[TaskItem] = []
+    for item in raw_plan:
+        if not isinstance(item, dict):
+            continue
+        content = item.get("step")
+        status = item.get("status")
+        if not isinstance(content, str) or not isinstance(status, str):
+            continue
+        content = content.strip()
+        status = status.strip()
+        if not content or not status:
+            continue
+        items.append(TaskItem(content=content, status=status))
+
+    if not items:
+        return None
+
+    explanation = arguments.get("explanation")
+    return TaskState(
+        items=items,
+        source="update_plan",
+        explanation=explanation if isinstance(explanation, str) and explanation.strip() else None,
+    )
 
 
 def _sqlite_insert_thread(
@@ -208,6 +242,7 @@ class CodexExtractor(Extractor):
         git_branch: str | None = None
         model: str | None = None
         files_modified: set[str] = set()
+        task_state: TaskState | None = None
 
         for idx, record in enumerate(_iter_jsonl(ref.path)):
             rtype = record.get("type")
@@ -273,6 +308,12 @@ class CodexExtractor(Extractor):
             elif ptype in ("function_call", "custom_tool_call"):
                 name = payload.get("name") or "tool"
                 args = payload.get("arguments") or payload.get("input") or ""
+                parsed_args = args if isinstance(args, (dict, list)) else None
+                if isinstance(args, str):
+                    try:
+                        parsed_args = json.loads(args)
+                    except json.JSONDecodeError:
+                        parsed_args = None
                 if isinstance(args, (dict, list)):
                     args_text = json.dumps(args, ensure_ascii=False)
                 else:
@@ -294,6 +335,8 @@ class CodexExtractor(Extractor):
                         for marker in ("*** Add File: ", "*** Update File: ", "*** Delete File: "):
                             if line.startswith(marker):
                                 files_modified.add(line[len(marker) :].strip())
+                elif name == "update_plan":
+                    task_state = _task_state_from_update_plan(parsed_args)
 
             elif ptype in ("function_call_output", "custom_tool_call_output"):
                 output = payload.get("output")
@@ -327,7 +370,10 @@ class CodexExtractor(Extractor):
         return CanonicalTranscript(
             metadata=meta,
             transcript=messages,
-            artifacts=Artifacts(files_modified=sorted(files_modified)),
+            artifacts=Artifacts(
+                files_modified=sorted(files_modified),
+                task_state=task_state,
+            ),
         )
 
 

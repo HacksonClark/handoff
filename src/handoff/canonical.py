@@ -33,9 +33,23 @@ class FileDiff:
 
 
 @dataclass
+class TaskItem:
+    content: str
+    status: str
+
+
+@dataclass
+class TaskState:
+    items: list[TaskItem] = field(default_factory=list)
+    source: str | None = None
+    explanation: str | None = None
+
+
+@dataclass
 class Artifacts:
     files_modified: list[str] = field(default_factory=list)
     diffs: list[FileDiff] = field(default_factory=list)
+    task_state: TaskState | None = None
 
 
 @dataclass

@@ -27,6 +27,14 @@ def to_markdown(t: CanonicalTranscript, *, include_header: bool = True) -> str:
             out.append("- Files touched:")
             for f in t.artifacts.files_modified:
                 out.append(f"  - `{f}`")
+        if t.artifacts.task_state and t.artifacts.task_state.items:
+            out.append("- Current task state:")
+            if t.artifacts.task_state.source:
+                out.append(f"  - Source: `{t.artifacts.task_state.source}`")
+            if t.artifacts.task_state.explanation:
+                out.append(f"  - Note: {t.artifacts.task_state.explanation}")
+            for item in t.artifacts.task_state.items:
+                out.append(f"  - [{item.status}] {item.content}")
         out.append("")
         out.append("---")
         out.append("")
