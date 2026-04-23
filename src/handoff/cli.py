@@ -177,9 +177,12 @@ def transfer_cmd(
         return
 
     if session_id:
-        ref = extractor.find_by_id(session_id, project) or extractor.find_by_id(session_id)
+        ref = extractor.find_by_id(session_id, project)
         if not ref:
-            _die(f"no {from_a} session with id starting with {session_id!r}")
+            _die(
+                f"no {from_a} session with id starting with {session_id!r} "
+                f"for project {project}"
+            )
             return
     else:
         ref = extractor.find_latest(project)
