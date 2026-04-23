@@ -263,11 +263,7 @@ def _resume_hint(agent: str, path: Path) -> ResumeHint:
             pass
         command = f"codex resume {session_id}"
         return ResumeHint(
-            text=(
-                "To continue in Codex:\n"
-                f"    {command}\n"
-                "(or just run `codex` in this directory — the most recent rollout is picked up)"
-            ),
+            text=("To continue in Codex:\n" f"    {command}"),
             command=command,
         )
     if agent == "opencode":
