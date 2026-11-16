@@ -13,6 +13,10 @@ def test_builtins_are_registered():
     assert "claude" in agents
     assert "codex" in agents
     assert "opencode" in agents
+    assert "cursor" in agents
+    assert "gemini" in agents
+    assert "aider" in agents
+    assert "atif" in agents
 
 
 def test_load_plugins_is_idempotent():

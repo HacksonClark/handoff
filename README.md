@@ -15,6 +15,8 @@ Ready to continue!
 
 When you switch between AI coding agents mid-project — rate limits, a second opinion, tool preference — you normally lose conversation history. `handoff` reads the transcript from one agent's home directory and injects it into another, so you can pick up exactly where you left off.
 
+Internally every session is normalized to a shared transcript model, and can be exported as **ATIF** (Agent Trajectory Interchange Format — the Harbor / Terminal-Bench standard) for portable interchange.
+
 ## Install
 
 The CLI is named `handoff`; the PyPI distribution is `handoff-agent` (the
@@ -37,15 +39,24 @@ handoff codex claude
 # Reverse it
 handoff claude codex
 
-# Three-way — OpenCode is also supported
+# Cursor ↔ others
+handoff cursor claude
+handoff codex cursor
+
+# Gemini CLI, aider, OpenCode
+handoff gemini claude
+handoff aider codex
 handoff codex opencode
-handoff opencode claude
+
+# Neutral ATIF hop (Harbor-compatible trajectory JSON)
+handoff cursor atif
+handoff atif claude
+
+# Export ATIF to stdout (great for Harbor trials / review)
+handoff cursor claude --no-inject --format atif > trajectory.json
 
 # See what would happen, don't touch anything
 handoff codex claude --dry-run --format markdown
-
-# Extract only, print to stdout (great for piping into LLM review)
-handoff codex claude --no-inject > /tmp/session.md
 
 # Pick a specific source session
 handoff codex claude --session-id 019cdd7f
@@ -55,7 +66,7 @@ handoff codex claude --session-id 019cdd7f
 
 ```bash
 handoff list                 # sessions available for the current project
-handoff list --agent codex   # filtered by agent
+handoff list --agent cursor  # filtered by agent
 handoff list --all           # sessions across all projects
 
 handoff status               # project + latest session per agent
@@ -75,8 +86,39 @@ handoff completion zsh --install   # show install one-liner
 | **Claude Code** | `~/.claude/projects/<encoded-cwd>/<uuid>.jsonl` | ✓ | ✓ |
 | **OpenAI Codex** | `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` | ✓ | ✓ |
 | **OpenCode** | `~/.local/share/opencode/storage/` | ✓ | ✓ |
+| **Cursor** | `~/.cursor/projects/<slug>/agent-transcripts/**/*.jsonl` | ✓ | ✓ |
+| **Gemini CLI** | `~/.gemini/tmp/<hash>/chats/*.{json,jsonl}` | ✓ | ✓ |
+| **aider** | `.aider.chat.history.md` (project-local) | ✓ | ✓ |
+| **ATIF store** | `~/.handoff/trajectories/<encoded-cwd>/*.json` | ✓ | ✓ |
 
-Cursor and GitHub Copilot Chat are on the roadmap — they live inside VS Code's SQLite state, which needs a different adapter approach.
+Cursor injection writes an Agents Window transcript on disk. The IDE sidebar chat list uses a separate SQLite index (`state.vscdb`) and may not show the new session — open the Agents Window to continue.
+
+## Normalization & ATIF
+
+Every extractor produces a **canonical transcript** (flat messages: user/agent text, reasoning, tool calls/results, artifacts). Injectors consume that shape.
+
+For interchange with Harbor, Terminal-Bench, and other ATIF tooling, use:
+
+```bash
+# Print ATIF-v1.5 JSON
+handoff codex claude --no-inject --format atif
+
+# Persist into the built-in ATIF store, then re-inject elsewhere
+handoff cursor atif
+handoff atif claude --session-id <id>
+```
+
+ATIF maps cleanly onto handoff's model:
+
+| ATIF | handoff canonical |
+|---|---|
+| `steps[].source: user/system` | `Message(author=user/system, type=message)` |
+| `steps[].source: agent` + `message` / `reasoning_content` | agent `message` / `reasoning` |
+| `steps[].tool_calls` | `type=tool_call` (+ metadata) |
+| `steps[].observation.results` | `type=tool_result` |
+| `extra.handoff.*` | cwd, files_modified, task_state, source path |
+
+Harbor trial drops (`agent/trajectory.json`) are discovered automatically when you `handoff list --agent atif` / `handoff atif <agent>` from the trial directory.
 
 ## Configuration
 
@@ -86,8 +128,11 @@ Cursor and GitHub Copilot Chat are on the roadmap — they live inside VS Code's
 [agents]
 claude_home = "~/.claude"
 codex_home = "~/.codex"
+cursor_home = "~/.cursor"
+gemini_home = "~/.gemini"
 # opencode follows XDG_DATA_HOME; override below if yours lives somewhere else.
 # opencode_home = "~/.local/share/opencode"
+# atif_home = "~/.handoff/trajectories"
 
 [defaults]
 redact_secrets = true
@@ -104,6 +149,8 @@ patterns = [
 ]
 ```
 
+Any `{agent}_home` key is honored for plugins. Unknown agents fall back to `~/.{agent}`.
+
 Redaction is **best-effort** — the default patterns cover the common API-key shapes (OpenAI, Anthropic, GitHub, AWS, Bearer, PEM) but you should still review transcripts before sharing them externally.
 
 ## Plugins
@@ -113,28 +160,29 @@ Add support for a new agent by publishing a package that registers an extractor/
 ```toml
 # your_package/pyproject.toml
 [project.entry-points."handoff.agents"]
-aider = "your_package.aider:register"
+mybot = "your_package.mybot:register"
 ```
 
 ```python
-# your_package/aider.py
+# your_package/mybot.py
 from handoff.agents.base import register_extractor, register_injector
 
 def register() -> None:
-    register_extractor("aider", lambda home: AiderExtractor(home))
-    register_injector("aider", lambda home: AiderInjector(home))
+    register_extractor("mybot", lambda home: MyBotExtractor(home))
+    register_injector("mybot", lambda home: MyBotInjector(home))
 ```
 
-Install the plugin alongside handoff and `handoff aider claude` will just work.
+Install the plugin alongside handoff and `handoff mybot claude` will just work.
+Optional: set `mybot_home = "..."` under `[agents]` in `~/.handoff/config.toml`.
 
-See `src/handoff/agents/opencode.py` for a complete, real-world implementation.
+See `src/handoff/agents/cursor.py` or `src/handoff/agents/opencode.py` for complete implementations.
 
 ## Safety
 
 - **Non-destructive.** Source sessions are never modified.
 - **Injected files are created with mode `0600`.**
 - **Session IDs** are generated with `uuid4` / `secrets` — no collisions with source agents.
-- **Path-traversal guards** on the Claude project-dir encoder.
+- **Path-traversal guards** on project-dir encoders.
 - **Redaction** runs by default. Turn it off with `--no-redact-secrets` or `[defaults] redact_secrets = false`.
 
 ## Development

@@ -21,17 +21,26 @@
 
 ---
 
-## Supported Agents (MVP)
+## Supported Agents
 
-### Phase 1 (MVP)
-- **Claude Code** — Read/write from `~/.claude/`
-- **OpenAI Codex** — Read/write from `~/.codex/`
+### Built-in
+- **Claude Code** — `~/.claude/projects/`
+- **OpenAI Codex** — `~/.codex/sessions/`
+- **OpenCode** — `~/.local/share/opencode/`
+- **Cursor** — `~/.cursor/projects/*/agent-transcripts/`
+- **Gemini CLI** — `~/.gemini/tmp/*/chats/`
+- **aider** — `.aider.chat.history.md` (project-local)
+- **ATIF store** — `~/.handoff/trajectories/` (Harbor / Terminal-Bench interchange)
 
-### Phase 2 (Future)
-- **OpenCode** — Read/write from `~/.opencode/`
-- **GitHub Copilot** — Where applicable
-- **Cursor** — Editor-based context
-- Custom agents via plugin interface
+### Normalization
+Internal model: `CanonicalTranscript` (flat messages + artifacts).
+Interchange: **ATIF** (`--format atif`, or `handoff <agent> atif`) —
+Agent Trajectory Interchange Format from Harbor/Terminal-Bench.
+See `src/handoff/atif.py`.
+
+### Future / plugins
+- **GitHub Copilot Chat** — VS Code SQLite state
+- Custom agents via `handoff.agents` entry points
 
 ---
 
@@ -46,7 +55,9 @@ Transfer conversation context from one agent to another for the current project.
 ```bash
 handoff claude codex      # Transfer Claude Code context to Codex
 handoff codex claude      # Transfer Codex context to Claude Code
-handoff codex opencode    # Transfer Codex context to OpenCode
+handoff cursor claude     # Transfer Cursor context to Claude Code
+handoff cursor atif       # Normalize to ATIF trajectory store
+handoff atif claude       # Inject ATIF into Claude Code
 ```
 
 **How it works:**
@@ -60,7 +71,7 @@ handoff codex opencode    # Transfer Codex context to OpenCode
 
 **Options:**
 - `--session-id <ID>` — Specify which session to transfer (defaults to most recent)
-- `--format markdown|json|native` — Output format for review (doesn't inject)
+- `--format markdown|json|native|atif` — Output format for review (doesn't inject)
 - `--dry-run` — Show what would be transferred without modifying target
 - `--redact-secrets` — Remove API keys, tokens, env vars (default: true)
 - `--no-inject` — Extract only, print to stdout instead of writing to target

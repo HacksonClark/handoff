@@ -18,12 +18,15 @@ from handoff.agents import get_extractor, get_injector
 from handoff.agents.base import known_agents
 from handoff.canonical import CanonicalTranscript
 from handoff.config import Config, ensure_config, load_config
-from handoff.formatters import to_json, to_markdown
+from handoff.formatters import to_atif, to_json, to_markdown
 from handoff.redact import Redactor
 
 AGENT_ALIASES = {
     "cc": "claude",
     "claude-code": "claude",
+    "cursor-agent": "cursor",
+    "gemini-cli": "gemini",
+    "trajectory": "atif",
 }
 
 
@@ -125,9 +128,12 @@ def main() -> None:
 @click.option(
     "--format",
     "fmt",
-    type=click.Choice(["markdown", "json", "native"]),
+    type=click.Choice(["markdown", "json", "native", "atif"]),
     default=None,
-    help="Output format when printing (used with --dry-run or --no-inject).",
+    help=(
+        "Output format when printing (used with --dry-run or --no-inject). "
+        "atif = Agent Trajectory Interchange Format (Harbor/Terminal-Bench)."
+    ),
 )
 @click.option("--dry-run", is_flag=True, help="Show what would be transferred without writing.")
 @click.option(
@@ -179,10 +185,7 @@ def transfer_cmd(
     if session_id:
         ref = extractor.find_by_id(session_id, project)
         if not ref:
-            _die(
-                f"no {from_a} session with id starting with {session_id!r} "
-                f"for project {project}"
-            )
+            _die(f"no {from_a} session with id starting with {session_id!r} for project {project}")
             return
     else:
         ref = extractor.find_latest(project)
@@ -233,6 +236,8 @@ def transfer_cmd(
 def _emit(transcript: CanonicalTranscript, fmt: str) -> None:
     if fmt == "json":
         click.echo(to_json(transcript))
+    elif fmt == "atif":
+        click.echo(to_atif(transcript), nl=False)
     elif fmt == "markdown":
         click.echo(to_markdown(transcript))
     else:
@@ -266,7 +271,7 @@ def _resume_hint(agent: str, path: Path) -> ResumeHint:
             pass
         command = f"codex resume {session_id}"
         return ResumeHint(
-            text=("To continue in Codex:\n" f"    {command}"),
+            text=(f"To continue in Codex:\n    {command}"),
             command=command,
         )
     if agent == "opencode":
@@ -276,6 +281,44 @@ def _resume_hint(agent: str, path: Path) -> ResumeHint:
                 "To continue in OpenCode:\n"
                 "    opencode       # then open the 'Handoff from <agent>' session from the session list\n"
                 f"(session id: {session_id})"
+            ),
+            command=None,
+        )
+    if agent == "cursor":
+        return ResumeHint(
+            text=(
+                "To continue in Cursor:\n"
+                "    Open the Agents Window — it reads transcripts from disk.\n"
+                f"    Transcript: {path}\n"
+                "    (IDE sidebar chat history uses a separate SQLite index and may not list this session.)"
+            ),
+            command=None,
+        )
+    if agent == "gemini":
+        return ResumeHint(
+            text=(
+                "To continue in Gemini CLI:\n"
+                "    gemini          # then resume/select the handoff session if listed\n"
+                f"(session file: {path})"
+            ),
+            command=None,
+        )
+    if agent == "aider":
+        command = "aider --restore-chat-history"
+        return ResumeHint(
+            text=(
+                "To continue in aider (loads the whole history file):\n"
+                f"    {command}\n"
+                f"(history: {path})"
+            ),
+            command=command,
+        )
+    if agent == "atif":
+        return ResumeHint(
+            text=(
+                "ATIF trajectory written. Re-inject into any agent with:\n"
+                f"    handoff atif <agent> --session-id {session_id}\n"
+                f"(file: {path})"
             ),
             command=None,
         )
@@ -438,6 +481,12 @@ def config_cmd(edit: bool, show_path: bool) -> None:
     click.echo(f"  claude_home    = {cfg.claude_home}")
     click.echo(f"  codex_home     = {cfg.codex_home}")
     click.echo(f"  opencode_home  = {cfg.opencode_home}")
+    click.echo(f"  cursor_home    = {cfg.cursor_home}")
+    click.echo(f"  gemini_home    = {cfg.gemini_home}")
+    click.echo(f"  aider_home     = {cfg.aider_home}")
+    click.echo(f"  atif_home      = {cfg.atif_home}")
+    for name, home in sorted(cfg.agent_homes.items()):
+        click.echo(f"  {name}_home    = {home}")
     click.echo(f"  redact_secrets = {cfg.redact_secrets}")
     click.echo(f"  auto_inject    = {cfg.auto_inject}")
     click.echo(f"  default_format = {cfg.default_format}")
