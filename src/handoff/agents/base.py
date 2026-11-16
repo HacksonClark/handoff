@@ -158,6 +158,10 @@ def load_plugins(group: str = "handoff.agents") -> list[str]:
 
 # Eagerly register built-in adapters. Imports live at the bottom to avoid
 # circular-import cycles during package init.
+from handoff.agents import aider as _aider  # noqa: E402,F401
+from handoff.agents import atif_store as _atif_store  # noqa: E402,F401
 from handoff.agents import claude as _claude  # noqa: E402,F401
 from handoff.agents import codex as _codex  # noqa: E402,F401
+from handoff.agents import cursor as _cursor  # noqa: E402,F401
+from handoff.agents import gemini as _gemini  # noqa: E402,F401
 from handoff.agents import opencode as _opencode  # noqa: E402,F401

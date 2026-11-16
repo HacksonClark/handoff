@@ -1,6 +1,6 @@
 [project]
 name = "handoff-agent"
-version = "0.1.3"
+version = "0.2.0"
 description = "Seamlessly switch between AI coding agents without losing context."
 readme = "README.md"
 license = { text = "MIT" }
@@ -8,7 +8,7 @@ requires-python = ">=3.10"
 authors = [
     { name = "Jackson Clark", email = "jclark58@illinois.edu" },
 ]
-keywords = ["ai", "agents", "claude", "codex", "cli", "llm", "handoff"]
+keywords = ["ai", "agents", "claude", "codex", "cursor", "atif", "cli", "llm", "handoff"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Environment :: Console",
@@ -43,6 +43,10 @@ handoff = "handoff.cli:main"
 claude = "handoff.agents.claude:register"
 codex = "handoff.agents.codex:register"
 opencode = "handoff.agents.opencode:register"
+cursor = "handoff.agents.cursor:register"
+gemini = "handoff.agents.gemini:register"
+aider = "handoff.agents.aider:register"
+atif = "handoff.agents.atif_store:register"
 
 [dependency-groups]
 dev = [

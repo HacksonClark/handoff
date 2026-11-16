@@ -54,10 +54,26 @@ def test_expanduser_in_paths(tmp_path):
     assert str(cfg.claude_home).endswith("/claude")
 
 
-def test_home_for_unknown_agent():
+def test_home_for_unknown_agent_falls_back_to_dot_dir():
     cfg = Config()
-    try:
-        cfg.home_for("nonexistent")
-    except KeyError:
-        return
-    raise AssertionError("expected KeyError")
+    # Plugins no longer need a Config edit — unknown agents resolve to ~/.{name}.
+    assert cfg.home_for("nonexistent") == Path.home() / ".nonexistent"
+
+
+def test_home_for_new_builtins():
+    cfg = Config()
+    assert cfg.home_for("cursor") == Path.home() / ".cursor"
+    assert cfg.home_for("atif") == Path.home() / ".handoff" / "trajectories"
+    assert cfg.home_for("gemini") == Path.home() / ".gemini"
+
+
+def test_extra_agent_homes_from_config(tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text(
+        """
+[agents]
+mybot_home = "/opt/mybot"
+"""
+    )
+    cfg = load_config(path)
+    assert cfg.home_for("mybot") == Path("/opt/mybot")

@@ -51,12 +51,7 @@ def _assistant_tool_use(name: str, input_obj: dict, call_id: str = "toolu_1") ->
 def _assistant_todowrite(items: list[tuple[str, str]]) -> dict:
     return _assistant_tool_use(
         "TodoWrite",
-        {
-            "todos": [
-                {"content": content, "status": status}
-                for content, status in items
-            ]
-        },
+        {"todos": [{"content": content, "status": status} for content, status in items]},
         call_id="toolu_todo",
     )
 
@@ -92,10 +87,7 @@ def _task_reminder(items: list[tuple[str, str]]) -> dict:
         "attachment": {
             "type": "task_reminder",
             "itemCount": len(items),
-            "content": [
-                {"subject": content, "status": status}
-                for content, status in items
-            ],
+            "content": [{"subject": content, "status": status} for content, status in items],
         },
         "timestamp": "2026-04-01T12:00:05Z",
         "sessionId": "00000000-1111-2222-3333-444455556666",
